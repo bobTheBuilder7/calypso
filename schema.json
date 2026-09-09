@@ -1,0 +1,36 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Config",
+	"type": "object",
+	"properties": {
+		"websites": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/Website"
+			}
+		}
+	},
+	"required": ["websites"],
+	"additionalProperties": false,
+	"$defs": {
+		"Website": {
+			"type": "object",
+			"properties": {
+				"http1": {
+					"type": "boolean"
+				},
+				"http2": {
+					"type": "boolean"
+				},
+				"http3": {
+					"type": "boolean"
+				},
+				"port": {
+					"type": "integer"
+				}
+			},
+			"required": ["http1", "http2", "http3", "port"],
+			"additionalProperties": false
+		}
+	}
+}
