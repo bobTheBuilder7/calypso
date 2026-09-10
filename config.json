@@ -1,0 +1,11 @@
+{
+	"websites": [
+		{
+			"domain": "example.com",
+			"http1": true,
+			"http2": true,
+			"http3": false,
+			"port": 4000
+		}
+	]
+}
