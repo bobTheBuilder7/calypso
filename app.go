@@ -1,8 +1,10 @@
 package main
 
 import (
-	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"strconv"
 )
 
 type application struct {
@@ -11,20 +13,42 @@ type application struct {
 }
 
 func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	port, ok := app.hostToPort[req.Host]
+	host := req.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	port, ok := app.hostToPort[host]
 	if !ok {
-		http.Error(w, "no such domain", 500)
+		http.Error(w, "no such domain", http.StatusNotFound)
 		return
 	}
 
 	url := req.URL.Clone()
-	url.Host = fmt.Sprintf("%s:%d", "localhost", port)
 	url.Scheme = "http"
+	url.Host = net.JoinHostPort("localhost", strconv.Itoa(int(port)))
 
-	proxyReq, _ := http.NewRequestWithContext(req.Context(), req.Method, url.String(), req.Body)
+	proxyReq, err := http.NewRequestWithContext(req.Context(), req.Method, url.String(), req.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	proxyReq.Header = req.Header.Clone()
 
-	defer req.Body.Close()
+	proxyResp, err := app.httpClient.Do(proxyReq)
+	if err != nil {
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		return
+	}
+	defer proxyResp.Body.Close()
 
-	proxyReq.Header = req.Header
+	w.WriteHeader(proxyResp.StatusCode)
 
+	for key, values := range proxyResp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	_, _ = io.Copy(w, proxyResp.Body)
 }

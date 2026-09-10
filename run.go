@@ -16,7 +16,7 @@ import (
 const MaxIdleConnsPerHost = 512
 
 func run(ctx context.Context, cfg Config) error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
 	defer cancel()
 
 	clientProtocols := new(http.Protocols)
