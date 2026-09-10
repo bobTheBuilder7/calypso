@@ -8,8 +8,8 @@ import (
 )
 
 type application struct {
-	httpClient *http.Client
-	hostToPort map[string]uint16
+	httpClient    *http.Client
+	hostToWebsite map[string]Website
 }
 
 func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -18,7 +18,7 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		host = h
 	}
 
-	port, ok := app.hostToPort[host]
+	website, ok := app.hostToWebsite[host]
 	if !ok {
 		http.Error(w, "no such domain", http.StatusNotFound)
 		return
@@ -26,7 +26,7 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	url := req.URL.Clone()
 	url.Scheme = "http"
-	url.Host = net.JoinHostPort("localhost", strconv.Itoa(int(port)))
+	url.Host = net.JoinHostPort("localhost", strconv.Itoa(int(website.Port)))
 
 	proxyReq, err := http.NewRequestWithContext(req.Context(), req.Method, url.String(), req.Body)
 	if err != nil {

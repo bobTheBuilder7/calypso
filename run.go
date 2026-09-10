@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -11,6 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 const MaxIdleConnsPerHost = 512
@@ -20,7 +23,6 @@ func run(ctx context.Context, cfg Config) error {
 	defer cancel()
 
 	clientProtocols := new(http.Protocols)
-
 	clientProtocols.SetHTTP1(true)
 	clientProtocols.SetHTTP2(false)
 
@@ -29,55 +31,99 @@ func run(ctx context.Context, cfg Config) error {
 		ExpectContinueTimeout:  1 * time.Second,
 		DisableCompression:     true,
 		Protocols:              clientProtocols,
-		MaxConnsPerHost:        0,        // no limit
-		MaxResponseHeaderBytes: 10 << 20, // 10MB
+		MaxConnsPerHost:        0, // no limit
+		MaxResponseHeaderBytes: 10 << 20,
 		MaxIdleConnsPerHost:    MaxIdleConnsPerHost,
 		MaxIdleConns:           MaxIdleConnsPerHost * len(cfg.Websites),
 	}
 
-	hostToPort := make(map[string]uint16)
-
+	hostToWebsite := make(map[string]Website)
+	var domains []string
 	for _, website := range cfg.Websites {
-		hostToPort[website.Domain] = website.Port
+		hostToWebsite[website.Domain] = website
+		domains = append(domains, website.Domain)
+	}
+
+	certManager := &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      autocert.DirCache(".cert-cache"),
+		HostPolicy: autocert.HostWhitelist(domains...),
 	}
 
 	app := &application{
-		httpClient: &http.Client{
-			Transport: httpTransport,
-		},
-		hostToPort: hostToPort,
+		httpClient:    &http.Client{Transport: httpTransport},
+		hostToWebsite: hostToWebsite,
 	}
 
-	server := &http.Server{
+	serverH1H2 := &http.Server{
 		Handler:               app,
 		DisableClientPriority: true,
 		ErrorLog:              log.New(io.Discard, "", 0),
 		TLSConfig: &tls.Config{
 			GetConfigForClient: func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
-				return &tls.Config{}, nil
+				website, ok := hostToWebsite[chi.ServerName]
+				if !ok {
+					return nil, fmt.Errorf("unknown domain %q", chi.ServerName)
+				}
+
+				var nextProtos []string
+				if website.HTTP2 {
+					nextProtos = append(nextProtos, "h2")
+				}
+				if website.HTTP1 {
+					nextProtos = append(nextProtos, "http/1.1")
+				}
+				nextProtos = append(nextProtos, "acme-tls/1")
+
+				return &tls.Config{
+					GetCertificate: certManager.GetCertificate,
+					NextProtos:     nextProtos,
+				}, nil
 			},
 		},
 	}
 
-	ln, err := net.Listen("tcp", ":80")
+	ln80, err := net.Listen("tcp", ":80")
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
-	defer ln.Close()
-
+	defer ln80.Close()
 	log.Println("listening on :80")
 
+	challengeServerProtocols := &http.Protocols{}
+	challengeServerProtocols.SetHTTP1(true)
+	challengeServerProtocols.SetHTTP2(false)
+	challengeServer := &http.Server{
+		Handler:   certManager.HTTPHandler(nil),
+		ErrorLog:  log.New(io.Discard, "", 0),
+		Protocols: challengeServerProtocols,
+	}
 	go func() {
-		err = server.Serve(ln)
-		if err != nil {
-			log.Println(err.Error())
+		err := challengeServer.Serve(ln80)
+		if err != nil && err != http.ErrServerClosed {
+			panic(err.Error())
+		}
+	}()
+
+	ln443, err := tls.Listen("tcp", ":443", serverH1H2.TLSConfig)
+	if err != nil {
+		return err
+	}
+	defer ln443.Close()
+	log.Println("listening on :443")
+
+	go func() {
+		err := serverH1H2.Serve(ln443)
+		if err != nil && err != http.ErrServerClosed {
+			panic(err.Error())
 		}
 	}()
 
 	<-ctx.Done()
 
-	shutdownCtx, _ := context.WithTimeout(context.Background(), time.Second*5)
-	server.Shutdown(shutdownCtx)
-
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	_ = challengeServer.Shutdown(shutdownCtx)
+	_ = serverH1H2.Shutdown(shutdownCtx)
 	return nil
 }
