@@ -85,7 +85,7 @@ func run(ctx context.Context, cfg Config) error {
 
 	ln80, err := net.Listen("tcp", ":80")
 	if err != nil {
-		return err
+		panic(err.Error())
 	}
 	defer ln80.Close()
 	log.Println("listening on :80")
@@ -107,7 +107,7 @@ func run(ctx context.Context, cfg Config) error {
 
 	ln443, err := net.Listen("tcp", ":443")
 	if err != nil {
-		return err
+		panic(err.Error())
 	}
 	defer ln443.Close()
 	log.Println("listening on :443")
