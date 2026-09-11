@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type application struct {
@@ -16,6 +17,17 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	host := req.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
+	}
+
+	if strings.HasPrefix(strings.ToLower(host), "www.") {
+		location := req.URL.Clone()
+		location.Scheme = "http"
+		if req.TLS != nil {
+			location.Scheme = "https"
+		}
+		location.Host = strings.TrimPrefix(req.Host, "www.")
+		http.Redirect(w, req, location.String(), http.StatusPermanentRedirect)
+		return
 	}
 
 	website, ok := app.hostToWebsite[host]

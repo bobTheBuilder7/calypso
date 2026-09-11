@@ -90,7 +90,7 @@ func run(ctx context.Context, cfg Config) error {
 	defer ln80.Close()
 	log.Println("listening on :80")
 
-	challengeServerProtocols := &http.Protocols{}
+	challengeServerProtocols := new(http.Protocols)
 	challengeServerProtocols.SetHTTP1(true)
 	challengeServerProtocols.SetHTTP2(false)
 	challengeServer := &http.Server{
@@ -105,7 +105,7 @@ func run(ctx context.Context, cfg Config) error {
 		}
 	}()
 
-	ln443, err := tls.Listen("tcp", ":443", serverH1H2.TLSConfig)
+	ln443, err := net.Listen("tcp", ":443")
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func run(ctx context.Context, cfg Config) error {
 	log.Println("listening on :443")
 
 	go func() {
-		err := serverH1H2.Serve(ln443)
+		err := serverH1H2.ServeTLS(ln443, "", "")
 		if err != nil && err != http.ErrServerClosed {
 			panic(err.Error())
 		}
