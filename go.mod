@@ -1,4 +1,4 @@
-module calypso
+module github.com/bobTheBuilder7/calypso
 
 go 1.27.0
 
