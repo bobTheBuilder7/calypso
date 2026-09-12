@@ -54,13 +54,11 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	defer proxyResp.Body.Close()
 
-	w.WriteHeader(proxyResp.StatusCode)
-
 	for key, values := range proxyResp.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
 	}
-
+	w.WriteHeader(proxyResp.StatusCode)
 	_, _ = io.Copy(w, proxyResp.Body)
 }
