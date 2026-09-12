@@ -46,6 +46,11 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	proxyReq.Header = req.Header.Clone()
+	clientIP := req.RemoteAddr
+	if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+		clientIP = host
+	}
+	proxyReq.Header.Set("X-Real-IP", clientIP)
 
 	proxyResp, err := app.httpClient.Do(proxyReq)
 	if err != nil {
@@ -59,6 +64,7 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			w.Header().Add(key, value)
 		}
 	}
+	w.Header().Set("Server", "calypso")
 	w.WriteHeader(proxyResp.StatusCode)
 	_, _ = io.Copy(w, proxyResp.Body)
 }
