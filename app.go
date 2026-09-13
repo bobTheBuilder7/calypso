@@ -65,6 +65,11 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	w.Header().Set("Server", "calypso")
+
+	if website.HTTP3 {
+		w.Header().Set("Alt-Svc", `h3=":443"; ma=2592000`)
+	}
+
 	w.WriteHeader(proxyResp.StatusCode)
 	_, _ = io.Copy(w, proxyResp.Body)
 }

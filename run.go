@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -38,13 +40,21 @@ func run(ctx context.Context, cfg Config) error {
 	}
 
 	hostToWebsite := make(map[string]Website)
+
 	var domains []string
+	var domainsH3 []string
+
 	for _, website := range cfg.Websites {
 		hostToWebsite[website.Domain] = website
+
 		domains = append(domains, website.Domain)
+
+		if website.HTTP3 {
+			domainsH3 = append(domainsH3, website.Domain)
+		}
 	}
 
-	certManager := &autocert.Manager{
+	certManagerH1H2 := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      autocert.DirCache(".cert-cache"),
 		HostPolicy: autocert.HostWhitelist(domains...),
@@ -76,25 +86,67 @@ func run(ctx context.Context, cfg Config) error {
 				nextProtos = append(nextProtos, "acme-tls/1")
 
 				return &tls.Config{
-					GetCertificate: certManager.GetCertificate,
+					GetCertificate: certManagerH1H2.GetCertificate,
 					NextProtos:     nextProtos,
 				}, nil
 			},
 		},
 	}
 
+	go func() {
+		if len(domainsH3) > 0 {
+			certManagerH3 := &autocert.Manager{
+				Prompt:     autocert.AcceptTOS,
+				Cache:      autocert.DirCache(".cert-cache"),
+				HostPolicy: autocert.HostWhitelist(domainsH3...),
+			}
+
+			serverH3 := &http3.Server{
+				Handler:         app,
+				EnableDatagrams: true,
+				QUICConfig: &quic.Config{
+					Allow0RTT:       true,
+					EnableDatagrams: true,
+				},
+				TLSConfig: &tls.Config{
+					GetConfigForClient: func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+						website, ok := hostToWebsite[chi.ServerName]
+						if !ok {
+							return nil, fmt.Errorf("unknown domain %q", chi.ServerName)
+						}
+
+						if !website.HTTP3 {
+							return nil, fmt.Errorf("http3 not supported %q", chi.ServerName)
+						}
+
+						return &tls.Config{
+							GetCertificate: certManagerH3.GetCertificate,
+							NextProtos:     []string{"h3"},
+						}, nil
+					},
+				},
+				Addr: ":443",
+			}
+			log.Println("listening on udp:443")
+			err := serverH3.ListenAndServe()
+			if err != nil && err != http.ErrServerClosed {
+				panic(err.Error())
+			}
+		}
+	}()
+
 	ln80, err := net.Listen("tcp", ":80")
 	if err != nil {
 		panic(err.Error())
 	}
 	defer ln80.Close()
-	log.Println("listening on :80")
+	log.Println("listening on tcp:80")
 
 	challengeServerProtocols := new(http.Protocols)
 	challengeServerProtocols.SetHTTP1(true)
 	challengeServerProtocols.SetHTTP2(false)
 	challengeServer := &http.Server{
-		Handler:   certManager.HTTPHandler(nil),
+		Handler:   certManagerH1H2.HTTPHandler(nil),
 		ErrorLog:  log.New(io.Discard, "", 0),
 		Protocols: challengeServerProtocols,
 	}
@@ -110,7 +162,7 @@ func run(ctx context.Context, cfg Config) error {
 		panic(err.Error())
 	}
 	defer ln443.Close()
-	log.Println("listening on :443")
+	log.Println("listening on tcp:443")
 
 	go func() {
 		err := serverH1H2.ServeTLS(ln443, "", "")
