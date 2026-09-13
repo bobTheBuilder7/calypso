@@ -108,7 +108,7 @@ func run(ctx context.Context, cfg Config) error {
 					Allow0RTT:       true,
 					EnableDatagrams: true,
 				},
-				TLSConfig: &tls.Config{
+				TLSConfig: http3.ConfigureTLSConfig(&tls.Config{
 					GetConfigForClient: func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
 						website, ok := hostToWebsite[chi.ServerName]
 						if !ok {
@@ -124,8 +124,8 @@ func run(ctx context.Context, cfg Config) error {
 							NextProtos:     []string{"h3"},
 						}, nil
 					},
-				},
-				Addr: ":443",
+				}),
+				Addr: "0.0.0.0:443",
 			}
 			log.Println("listening on udp:443")
 			err := serverH3.ListenAndServe()
