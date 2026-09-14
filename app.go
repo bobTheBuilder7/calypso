@@ -13,6 +13,18 @@ type application struct {
 	hostToWebsite map[string]Website
 }
 
+var hopHeaders = []string{
+	"Connection",
+	"Proxy-Connection", // non-standard but still sent by libcurl and rejected by e.g. google
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",      // canonicalized version of "TE"
+	"Trailer", // not Trailers per URL above; https://www.rfc-editor.org/errata_search.php?eid=4522
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
 func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	host := req.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -46,6 +58,9 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	proxyReq.Header = req.Header.Clone()
+	for _, header := range hopHeaders {
+		proxyReq.Header.Del(header)
+	}
 	clientIP := req.RemoteAddr
 	if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
 		clientIP = host
@@ -60,6 +75,16 @@ func (app *application) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	defer proxyResp.Body.Close()
 
 	for key, values := range proxyResp.Header {
+		hop := false
+		for _, header := range hopHeaders {
+			if http.CanonicalHeaderKey(key) == header {
+				hop = true
+				break
+			}
+		}
+		if hop {
+			continue
+		}
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
